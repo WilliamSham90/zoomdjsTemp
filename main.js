@@ -13,16 +13,31 @@
   onScroll();
   window.addEventListener('scroll', onScroll, { passive:true });
 
-  /* ---- Mobile menu ---- */
-  var burger = document.getElementById('burger');
-  var links  = document.getElementById('navLinks');
-  burger.addEventListener('click', function(){
-    links.classList.toggle('open');
-    burger.classList.toggle('active');
-  });
-  links.addEventListener('click', function(e){
-    if (e.target.tagName === 'A') links.classList.remove('open');
-  });
+  /* ---- Mobile drawer menu ---- */
+  var burger   = document.getElementById('burger');
+  var drawer   = document.getElementById('mDrawer');
+  var backdrop = document.getElementById('mBackdrop');
+  var mClose   = document.getElementById('mClose');
+  var mLinks   = document.getElementById('mLinks');
+  if (burger && drawer){
+    var openDrawer = function(){
+      drawer.classList.add('open'); if (backdrop) backdrop.classList.add('open');
+      burger.classList.add('active'); drawer.setAttribute('aria-hidden', 'false');
+      document.body.style.overflow = 'hidden';
+    };
+    var closeDrawer = function(){
+      drawer.classList.remove('open'); if (backdrop) backdrop.classList.remove('open');
+      burger.classList.remove('active'); drawer.setAttribute('aria-hidden', 'true');
+      document.body.style.overflow = '';
+    };
+    burger.addEventListener('click', function(){
+      drawer.classList.contains('open') ? closeDrawer() : openDrawer();
+    });
+    if (mClose)   mClose.addEventListener('click', closeDrawer);
+    if (backdrop) backdrop.addEventListener('click', closeDrawer);
+    if (mLinks)   mLinks.addEventListener('click', function(e){ if (e.target.closest('a')) closeDrawer(); });
+    document.addEventListener('keydown', function(e){ if (e.key === 'Escape' && drawer.classList.contains('open')) closeDrawer(); });
+  }
 
   /* ---- Scroll reveal ---- */
   var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
