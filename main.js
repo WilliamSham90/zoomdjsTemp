@@ -249,73 +249,88 @@
     gObs.observe(genres);
   }
 
-  /* ---- Packages slider (responsive, swipe + arrows + loop) ---- */
-  var track = document.getElementById('pkgTrack');
-  if (track){
+  /* ---- Packages slider (responsive: swipe + arrows + dots; nav hidden when all cards fit) ---- */
+  (function(){
+    var track = document.getElementById('pkgTrack');
+    if (!track) return;
+    var carousel = document.getElementById('pkgCarousel');
     var prev = document.getElementById('pkgPrev');
     var next = document.getElementById('pkgNext');
-    var step = function(){
-      var card = track.querySelector('.pkg');
-      if (!card) return track.clientWidth;
-      var gap = parseFloat(getComputedStyle(track).columnGap || getComputedStyle(track).gap || 22) || 22;
-      return card.getBoundingClientRect().width + gap;
-    };
-    var maxScroll = function(){ return track.scrollWidth - track.clientWidth; };
+    var dotsWrap = document.getElementById('pkgDots');
 
-    /* animate scrollLeft directly (no CSS smooth / no snap — those block it) */
-    var raf = null;
+    var maxScroll  = function(){ return track.scrollWidth - track.clientWidth; };
+    var hasOverflow= function(){ return maxScroll() > 4; };
+    function gapPx(){ return parseFloat(getComputedStyle(track).columnGap || getComputedStyle(track).gap) || 22; }
+    function cardStep(){ var c = track.querySelector('.pkg'); return c ? c.getBoundingClientRect().width + gapPx() : track.clientWidth; }
+    function perView(){ return Math.max(1, Math.round((track.clientWidth + gapPx()) / cardStep())); }
+    function pageCount(){ var n = track.querySelectorAll('.pkg').length; return Math.max(1, n - perView() + 1); }
+    function curPage(){ return Math.min(pageCount() - 1, Math.max(0, Math.round(track.scrollLeft / cardStep()))); }
+
     var animateTo = function(target){
       target = Math.max(0, Math.min(target, maxScroll()));
-      if (raf) cancelAnimationFrame(raf);
-      if (reduce){ track.scrollLeft = target; return; }
-      var start = track.scrollLeft, dist = target - start, t0 = null, dur = 440;
-      if (Math.abs(dist) < 1){ track.scrollLeft = target; return; }
-      var frame = function(ts){
-        if (!t0) t0 = ts;
-        var p = Math.min((ts - t0) / dur, 1);
-        var e = 1 - Math.pow(1 - p, 3);
-        track.scrollLeft = start + dist * e;
-        if (p < 1) raf = requestAnimationFrame(frame);
-      };
-      raf = requestAnimationFrame(frame);
+      try { track.scrollTo({ left: target, behavior: reduce ? 'auto' : 'smooth' }); }
+      catch (e){ track.scrollLeft = target; }
+      setTimeout(updateDots, 80);
     };
     var goNext = function(){
       if (track.scrollLeft >= maxScroll() - 4) animateTo(0);
-      else animateTo(track.scrollLeft + step());
+      else animateTo(track.scrollLeft + cardStep());
     };
     var goPrev = function(){
       if (track.scrollLeft <= 4) animateTo(maxScroll());
-      else animateTo(track.scrollLeft - step());
+      else animateTo(track.scrollLeft - cardStep());
     };
-    if (next) next.addEventListener('click', goNext);
-    if (prev) prev.addEventListener('click', goPrev);
+    if (next) next.addEventListener('click', function(){ goNext(); pause(); });
+    if (prev) prev.addEventListener('click', function(){ goPrev(); pause(); });
+
+    /* dots — one per page (rebuilt on resize) */
+    function buildDots(){
+      if (!dotsWrap) return;
+      var n = pageCount();
+      dotsWrap.innerHTML = '';
+      for (var i = 0; i < n; i++){
+        var b = document.createElement('button');
+        b.setAttribute('aria-label', 'Go to package set ' + (i + 1));
+        (function(i){ b.addEventListener('click', function(){ animateTo(i * cardStep()); pause(); }); })(i);
+        dotsWrap.appendChild(b);
+      }
+      updateDots();
+    }
+    function updateDots(){
+      if (!dotsWrap) return;
+      var active = curPage();
+      Array.prototype.forEach.call(dotsWrap.children, function(d, i){ d.classList.toggle('on', i === active); });
+    }
+    track.addEventListener('scroll', function(){ updateDots(); }, { passive:true });
+
+    /* show/hide arrows + dots based on overflow (wide screens fit all 4 → no nav) */
+    function syncNav(){
+      if (carousel) carousel.classList.toggle('no-nav', !hasOverflow());
+      buildDots();
+    }
 
     /* drag-to-scroll */
-    var down = false, startX = 0, startL = 0, moved = false;
-    track.addEventListener('pointerdown', function(e){
-      down = true; moved = false; startX = e.clientX; startL = track.scrollLeft;
-      if (raf) cancelAnimationFrame(raf);
-      track.style.cursor = 'grabbing';
-    });
-    track.addEventListener('pointermove', function(e){
-      if (!down) return;
-      var dx = e.clientX - startX;
-      if (Math.abs(dx) > 4) moved = true;
-      track.scrollLeft = startL - dx;
-    });
-    var endDrag = function(){ down = false; track.style.cursor = ''; };
+    var down=false, startX=0, startL=0, moved=false;
+    track.addEventListener('pointerdown', function(e){ down=true; moved=false; startX=e.clientX; startL=track.scrollLeft; track.style.cursor='grabbing'; pause(); });
+    track.addEventListener('pointermove', function(e){ if(!down)return; var dx=e.clientX-startX; if(Math.abs(dx)>4)moved=true; track.scrollLeft=startL-dx; });
+    var endDrag=function(){ down=false; track.style.cursor=''; };
     track.addEventListener('pointerup', endDrag);
     track.addEventListener('pointerleave', endDrag);
-    track.addEventListener('click', function(e){ if (moved){ e.preventDefault(); e.stopPropagation(); } }, true);
+    track.addEventListener('click', function(e){ if(moved){ e.preventDefault(); e.stopPropagation(); } }, true);
 
-    /* gentle autoplay; pauses on interaction */
-    if (!reduce){
-      var auto = setInterval(goNext, 5200);
-      var pause = function(){ if (auto){ clearInterval(auto); auto = null; } };
-      ['pointerenter','pointerdown','focusin'].forEach(function(ev){ track.addEventListener(ev, pause); });
-      [prev, next].forEach(function(b){ if (b) b.addEventListener('click', pause); });
-    }
-  }
+    /* gentle autoplay; pauses on interaction, only when there's something to scroll */
+    var auto=null;
+    function startAuto(){ if(reduce || !hasOverflow()) return; clearInterval(auto); auto=setInterval(goNext, 5200); }
+    function pause(){ if(auto){ clearInterval(auto); auto=null; } }
+    track.addEventListener('pointerenter', pause);
+    track.addEventListener('focusin', pause);
+
+    var prt;
+    window.addEventListener('resize', function(){ clearTimeout(prt); prt=setTimeout(syncNav, 150); }, { passive:true });
+
+    syncNav();
+    startAuto();
+  })();
 
   /* ---- Our Work: masonry gallery slider (arrows + dots + swipe) + lightbox ---- */
   (function(){
@@ -364,12 +379,20 @@
       { f:'image54.jpg', t:'Red room',     s:'Party' }
     ];
 
+    var gPrev   = document.getElementById('galPrev');
+    var gNext   = document.getElementById('galNext');
+    var dotsWrap= document.getElementById('galDots');
+    var pages = [], N = 0, gi = 0, gTimer = null, curPer = 0, tiles = [];
+
     function esc(str){ return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-    (function buildGallery(){
-      var PER = 6, html = '';
-      for (var i = 0; i < galleryImages.length; i += PER){
+    function perPage(){ return window.innerWidth <= 560 ? 3 : 6; }
+
+    function buildGallery(){
+      curPer = perPage();
+      var html = '';
+      for (var i = 0; i < galleryImages.length; i += curPer){
         html += '<div class="gal-page">';
-        for (var j = i; j < Math.min(i + PER, galleryImages.length); j++){
+        for (var j = i; j < Math.min(i + curPer, galleryImages.length); j++){
           var g = galleryImages[j], src = 'Images/' + g.f, cap = esc(g.t) + ' \u2014 ' + esc(g.s);
           html += '<button type="button" class="gtile" data-full="' + src + '" data-title="' + esc(g.t) + '" data-sub="' + esc(g.s) + '">'
                 +   '<img src="' + src + '" alt="' + cap + '" loading="lazy" />'
@@ -379,17 +402,20 @@
         html += '</div>';
       }
       galTrack.innerHTML = html;
-    })();
-
-    var pages   = Array.prototype.slice.call(galTrack.children);
-    var N       = pages.length;
-    var gPrev   = document.getElementById('galPrev');
-    var gNext   = document.getElementById('galNext');
-    var dotsWrap= document.getElementById('galDots');
-    var gi = 0, gTimer = null;
+      pages = Array.prototype.slice.call(galTrack.children);
+      N = pages.length;
+      gi = Math.max(0, Math.min(gi, N - 1));
+      buildDots();
+      wireTiles();
+      apply(false);
+    }
 
     function setHeight(){
-      var h = pages[gi].offsetHeight;
+      /* Desktop (>=901px): the masonry page derives its height FROM the viewport
+         (CSS sets .gal-viewport height:560px). Reading page.offsetHeight back would
+         lock a collapsed height — so clear the inline height and let CSS govern. */
+      if (window.innerWidth >= 901){ galView.style.height = ''; return; }
+      var p = pages[gi], h = p && p.offsetHeight;
       if (h) galView.style.height = h + 'px';
     }
     function syncDots(){
@@ -405,7 +431,9 @@
     function gNextFn(){ go(gi + 1); }
     function gPrevFn(){ go(gi - 1); }
 
-    if (dotsWrap){
+    function buildDots(){
+      if (!dotsWrap) return;
+      dotsWrap.innerHTML = '';
       for (var i = 0; i < N; i++){
         var b = document.createElement('button');
         b.setAttribute('aria-label', 'Go to gallery page ' + (i + 1));
@@ -427,10 +455,9 @@
     galView.addEventListener('touchend',   function(){ if (sw && Math.abs(dx) > 45){ dx < 0 ? gNextFn() : gPrevFn(); } sw = false; restart(); });
 
     var grt;
-    window.addEventListener('resize', function(){ clearTimeout(grt); grt = setTimeout(function(){ apply(false); }, 150); }, {passive:true});
+    window.addEventListener('resize', function(){ clearTimeout(grt); grt = setTimeout(function(){ if (perPage() !== curPer) buildGallery(); else apply(false); }, 150); }, {passive:true});
 
     /* ---- lightbox ---- */
-    var tiles   = Array.prototype.slice.call(galTrack.querySelectorAll('.gtile'));
     var lb       = document.getElementById('lightbox');
     var lbImg    = document.getElementById('lbImg');
     var lbTitle  = document.getElementById('lbTitle');
@@ -461,7 +488,10 @@
     function lbNext(){ lbIdx = (lbIdx + 1) % tiles.length; renderLb(); }
     function lbPrev(){ lbIdx = (lbIdx - 1 + tiles.length) % tiles.length; renderLb(); }
 
-    tiles.forEach(function(t, i){ t.addEventListener('click', function(){ openLb(i); }); });
+    function wireTiles(){
+      tiles = Array.prototype.slice.call(galTrack.querySelectorAll('.gtile'));
+      tiles.forEach(function(t, i){ t.onclick = function(){ openLb(i); }; });
+    }
 
     if (lb){
       document.getElementById('lbClose').addEventListener('click', closeLb);
@@ -476,8 +506,8 @@
       });
     }
 
-    /* init + height recalcs once images settle */
-    apply(false);
+    /* init */
+    buildGallery();
     window.addEventListener('load', function(){ apply(false); });
     setTimeout(function(){ apply(false); }, 300);
     restart();
